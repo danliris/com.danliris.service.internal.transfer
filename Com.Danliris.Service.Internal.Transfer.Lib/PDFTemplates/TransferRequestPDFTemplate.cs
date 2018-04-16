@@ -130,7 +130,15 @@ namespace Com.Danliris.Service.Internal.Transfer.Lib.PDFTemplates
             footerCell2.HorizontalAlignment = Element.ALIGN_LEFT;
             table.AddCell(footerCell2);
 
-            table.WriteSelectedRows(0, -1, 20, 470, cb);
+
+
+            var footerCellspace = new PdfPCell(new Phrase(""));
+            footerCellspace.MinimumHeight = 15;
+            footerCellspace.Colspan = 5;
+            footerCellspace.Border = Rectangle.NO_BORDER;
+            footerCellspace.HorizontalAlignment = Element.ALIGN_LEFT;
+            table.AddCell(footerCellspace);
+
             #endregion
 
             #region CreateTable2
@@ -180,8 +188,14 @@ namespace Com.Danliris.Service.Internal.Transfer.Lib.PDFTemplates
             cell2.Phrase = new Phrase("", normal_font);
             table2.AddCell(cell2);
 
+            var footerCell3 = new PdfPCell(table2);
+            footerCell3.Colspan = 5;
+            footerCell3.Border = Rectangle.NO_BORDER;
+            footerCell3.HorizontalAlignment = Element.ALIGN_LEFT;
+            table.AddCell(footerCell3);
 
-            table2.WriteSelectedRows(0, -1, 20, 130, cb);
+            table.WriteSelectedRows(0, -1, 20, 470, cb);
+            // table2.WriteSelectedRows(0, -1, 20, 130, cb);
             #endregion
 
             //cb.BeginText();
