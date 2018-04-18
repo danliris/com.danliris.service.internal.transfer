@@ -15,7 +15,12 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Net.Http;
 using System.Net.Http.Headers;
+<<<<<<< HEAD
+using System.IO;
+using System.Data;
+=======
 using Com.Danliris.Service.Internal.Transfer.Lib.Models.InternalTransferOrderModel;
+>>>>>>> upstream/dev
 
 namespace Com.Danliris.Service.Internal.Transfer.Lib.Services.TransferRequestService
 {
@@ -31,7 +36,7 @@ namespace Com.Danliris.Service.Internal.Transfer.Lib.Services.TransferRequestSer
 
             List<string> SearchAttributes = new List<string>()
             {
-                "TRNo"
+                "TRNo","DivisionName","CategoryName","UnitName"
             };
 
             Query = ConfigureSearch(Query, SearchAttributes, Keyword);
@@ -247,36 +252,24 @@ namespace Com.Danliris.Service.Internal.Transfer.Lib.Services.TransferRequestSer
             return viewModel;
         }
 
-        public async Task<TransferRequest> CustomCodeGenerator(TransferRequest Model)
+        async Task<string> CustomCodeGenerator(TransferRequest model)
         {
-            var lastData = await this.DbSet.Where(w => string.Equals(w.UnitCode, Model.UnitCode)).OrderByDescending(o => o._CreatedUtc).FirstOrDefaultAsync();
-
             DateTime Now = DateTime.Now;
             string Year = Now.ToString("yy");
 
-            if (lastData == null)
+            string transferRequestNo = "TR" + model.UnitCode + Year;
+
+            var lastTransferRequestNo = await this.DbSet.Where(w => w.TRNo.StartsWith(transferRequestNo)).OrderByDescending(o => o.TRNo).FirstOrDefaultAsync();
+
+            if (lastTransferRequestNo == null)
             {
-                Model.AutoIncrementNumber = 1;
-                string Number = Model.AutoIncrementNumber.ToString().PadLeft(4, '0');
-                Model.TRNo = $"TR{Model.UnitCode}{Year}{Number}";
+                return transferRequestNo + "00001";
             }
             else
             {
-                if (lastData._CreatedUtc.Year < Now.Year)
-                {
-                    Model.AutoIncrementNumber = 1;
-                    string Number = Model.AutoIncrementNumber.ToString().PadLeft(4, '0');
-                    Model.TRNo = $"TR{Model.UnitCode}{Year}{Number}";
-                }
-                else
-                {
-                    Model.AutoIncrementNumber = lastData.AutoIncrementNumber + 1;
-                    string Number = Model.AutoIncrementNumber.ToString().PadLeft(4, '0');
-                    Model.TRNo = $"TR{Model.UnitCode}{Year}{Number}";
-                }
+                int lastNo = Int32.Parse(lastTransferRequestNo.TRNo.Replace(transferRequestNo, "")) + 1;
+                return transferRequestNo + lastNo.ToString().PadLeft(5, '0');
             }
-
-            return Model;
         }
 
         public override async Task<TransferRequest> ReadModelById(int id)
@@ -294,7 +287,7 @@ namespace Com.Danliris.Service.Internal.Transfer.Lib.Services.TransferRequestSer
             {
                 try
                 {
-                    Model = await this.CustomCodeGenerator(Model);
+                    Model.TRNo = await this.CustomCodeGenerator(Model);
                     Created = await this.CreateAsync(Model);
 
                     
@@ -481,6 +474,90 @@ namespace Com.Danliris.Service.Internal.Transfer.Lib.Services.TransferRequestSer
             }
 
             return Deleted;
+        }
+
+        public IQueryable<TransferRequestReportViewModel> GetReportQuery(string trNo, string unitId, string status, DateTime? dateFrom, DateTime? dateTo, int offset)
+        {
+            DateTime DateFrom = dateFrom == null ? new DateTime(1970, 1, 1) : (DateTime)dateFrom;
+            DateTime DateTo = dateTo == null ? DateTime.Now : (DateTime)dateTo;
+
+            var Query = (from a in DbContext.TransferRequests
+                         join b in DbContext.TransferRequestDetails on a.Id equals b.TransferRequestId
+                         where a._IsDeleted == false
+                             && a.TRNo == (string.IsNullOrWhiteSpace(trNo) ? a.TRNo : trNo)
+                             && a.UnitId == (string.IsNullOrWhiteSpace(unitId) ? a.UnitId : unitId)
+                             && b.Status == (string.IsNullOrWhiteSpace(status) ? b.Status : status)
+                             && a.TRDate.AddHours(offset).Date >= DateFrom.Date
+                             && a.TRDate.AddHours(offset).Date <= DateTo.Date
+                         select new TransferRequestReportViewModel
+                         {
+                             trNo = a.TRNo,
+                             trDate = a.TRDate,
+                             uom = b.UomUnit,
+                             unitName = a.UnitName,
+                             divisionName = a.DivisionName,
+                             categoryName = a.CategoryName,
+                             requestedArrivalDate = a.RequestedArrivalDate,
+                             productName = b.ProductName,
+                             productCode = b.ProductCode,
+                             grade = b.Grade,
+                             quantity = b.Quantity,
+                             isPosted = a.IsPosted,
+                             isCanceled = a.IsCanceled,
+                             status=b.Status,
+                             _updatedDate=a._LastModifiedUtc
+                         });
+
+            return Query;
+        }
+
+        public Tuple<List<TransferRequestReportViewModel>, int> GetReport(string trNo, string unitId, string status, DateTime? dateFrom, DateTime? dateTo, int page, int size, string Order, int offset)
+        {
+            var Query = GetReportQuery(trNo, unitId, status, dateFrom, dateTo, offset);
+
+            Dictionary<string, string> OrderDictionary = JsonConvert.DeserializeObject<Dictionary<string, string>>(Order);
+            if (OrderDictionary.Count.Equals(0))
+            {
+                Query = Query.OrderByDescending(b => b._updatedDate);
+            }
+            else
+            {
+                string Key = OrderDictionary.Keys.First();
+                string OrderType = OrderDictionary[Key];
+
+                //Query = Query.OrderBy(string.Concat(Key, " ", OrderType));
+            }
+
+            Pageable<TransferRequestReportViewModel> pageable = new Pageable<TransferRequestReportViewModel>(Query, page - 1, size);
+            List<TransferRequestReportViewModel> Data = pageable.Data.ToList<TransferRequestReportViewModel>();
+            int TotalData = pageable.TotalCount;
+
+            return Tuple.Create(Data, TotalData);
+        }
+
+        public MemoryStream GenerateExcel(string trNo, string unitId, string status, DateTime? dateFrom, DateTime? dateTo, int offset)
+        {
+            var Query = GetReportQuery(trNo, unitId, status, dateFrom, dateTo, offset);
+            Query = Query.OrderByDescending(b => b._updatedDate);
+            DataTable result = new DataTable();
+            result.Columns.Add(new DataColumn() { ColumnName = "Nomor TR", DataType = typeof(String) });
+            result.Columns.Add(new DataColumn() { ColumnName = "Tanggal TR", DataType = typeof(String) });
+            result.Columns.Add(new DataColumn() { ColumnName = "Unit", DataType = typeof(String) });
+            result.Columns.Add(new DataColumn() { ColumnName = "Kategori", DataType = typeof(String) });
+            result.Columns.Add(new DataColumn() { ColumnName = "Kode Barang", DataType = typeof(String) });
+            result.Columns.Add(new DataColumn() { ColumnName = "Nama Barang", DataType = typeof(String) });
+            result.Columns.Add(new DataColumn() { ColumnName = "Jumlah", DataType = typeof(double) });
+            result.Columns.Add(new DataColumn() { ColumnName = "Satuan", DataType = typeof(String) });
+            result.Columns.Add(new DataColumn() { ColumnName = "Tanggal diminta datang TR", DataType = typeof(String) });
+            result.Columns.Add(new DataColumn() { ColumnName = "Tanggal diminta datang TO Eksternal", DataType = typeof(String) });
+            result.Columns.Add(new DataColumn() { ColumnName = "Status", DataType = typeof(String) });
+            if (Query.ToArray().Count() == 0)
+                result.Rows.Add("", "", "", "", "", "", "", "", "", "", ""); // to allow column name to be generated properly for empty data as template
+            else
+                foreach (var item in Query)
+                    result.Rows.Add((item.trNo), item.trDate, item.unitName, item.categoryName, item.productCode, item.productName, item.quantity, item.uom, item.requestedArrivalDate, item.status);
+
+            return Excel.CreateExcel(new List<KeyValuePair<DataTable, string>>() { new KeyValuePair<DataTable, string>(result, "Territory") }, true);
         }
     }
 }
